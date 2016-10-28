@@ -1,0 +1,134 @@
+###Practical Machine Learning Assignment###
+
+####Background####    
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.     
+
+In this project, the aim is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the different ways that the participants actually perform the barbell lifts. The participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways.These 5 different ways are represented by the classe variable.  
+
+```{r,cache=TRUE}
+# set working directory and load required packages
+setwd("C:/Users/NUS/Desktop/rdata")
+
+suppressWarnings(library(ggplot2))
+suppressWarnings(library(randomForest))
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(RColorBrewer)
+library(ROCR)
+library(gplots)
+library(e1071)
+library(plyr)
+library(splines)
+library(parallel)
+suppressMessages(library(gbm))
+library(survival)
+
+```
+
+```{r, cache=TRUE}
+
+training<-read.csv("pml-training.csv",stringsAsFactors=F,na.strings = c("NA","#DIV/0!",""))
+testing<-read.csv("pml-testing.csv",stringsAsFactors=F,na.strings = c("NA","#DIV/0!",""))
+dim(training)
+dim(testing)
+
+```
+
+####Cleaning the Data####
+
+Variables with near zero variance, or have too much missing data (i.e. NA values)
+will be removed from the training dataset.Variables, such as the time stamp and the row numbers, were also removed as they do not provide any useful information in training the predictive model. 
+
+The training data consists of over 19,000 observations of 160 variables, with about 60 variables having no NA values, with the rest having all NA values.
+
+```{r,cache=TRUE}
+missing_data<- colSums(is.na(training)) 
+hist(missing_data)
+```
+
+```{r,cache=TRUE}
+#Remove variables with nearly zero variance
+nzv <- nearZeroVar(training, saveMetrics=TRUE)
+training <- training[,nzv$nzv==FALSE]
+testing<-testing[,nzv$nzv==FALSE]
+
+#generate a vector that counts the number of NAs in each column 
+a<-vector()
+                
+for(i in 1:length(training)) {
+        a[i]<- sum(is.na( training[, i]))
+}
+
+# generate a vector that counts the percentage of values in a column that consists of NA values.
+b<-a/nrow(training)
+
+# remove any column where the number of NAs exceed 70% of all the values for a variable
+#Ensure that the testing dataset has the same number of variables as the training dataset.
+training<-training[,b<=0.7]
+dim(training)
+testing<-testing[,b<=0.7]
+dim(testing)
+
+#remove the first five columns of the remaining dataset as it consist of values that do not contain useful information (for e.g. timestamp, or row numbers)
+testing<-testing[,-c(1:5)]
+training<-training[,-c(1:5)]
+dim(training)
+dim(testing)
+
+
+```
+
+####Generating a Validation Dataset####    
+
+As seen below, the training dataset is deliberately kept small as running more sophitcated algorithms, such as boosting and random forest models may take some time. 
+
+```{r,cache=TRUE}
+
+# further divide the training set into a smaller training set and a validation set
+# Only a quarter of the training dataset is used to train the machine learning algorithm as unning machine learning algorithms on large datasets may take some time.
+
+set.seed(1000)
+partition<-createDataPartition(training$classe,p=0.25,list=FALSE)
+subtraining<-training[partition,]
+validation<-training[-partition,]
+dim(subtraining)
+dim(validation)
+```
+
+####Running Machine Learning Algorithms####
+```{r,cache=TRUE}
+#Run the decision tree algorithm
+rpartFit<-train(classe~.,
+                data=training,
+                method="rpart",
+                trControl=trainControl(method="repeatedcv",
+                                       number=10,
+                                       repeats=10))
+
+rpartPred<-predict(rpartFit,newdata=validation)
+confusionMatrix(validation[,c("classe")],rpartPred)
+```
+
+As seen above, the decision tree algorithm does not perform well, and produces an algorithm that has poor accuracy.For example, the decision tree algorithm does not categorise any observations under classe "D". As a result,a generalized boosting model is used to fit the data below. 
+
+The trained boosting model was tested for its accuracy using the validation dataset, and the accuracy is about 97.9%. As the accuracy of the model is already relatively high, the boosting model was used to generate predictions for the dataset. 
+
+````{r,cache=TRUE}
+
+gbmFit<-train(classe~.,
+                data=subtraining,
+                method="gbm",
+                verbose=FALSE)
+gbmPred<-predict(gbmFit,newdata=validation)
+confusionMatrix(validation[,c("classe")],gbmPred)
+
+gbmPred1<-predict(gbmFit,newdata=testing)
+print(gbmPred1)
+testing$prediction<-gbmPred1
+
+```    
+
+In conclusion, while a decision tree model does not fit the data well, the generalized boosting model works generally well in predicting the dependent variable (i.e. classe).  
